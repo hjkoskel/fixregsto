@@ -68,7 +68,17 @@ func (p *Memloop) GetFirst(nRecords int64) ([]byte, error) {
 	return p.mem[0:n], nil
 }
 
+//ReadAll gets all content. Use with caution, small storages
+func (p *Memloop) ReadAll() ([]byte, error) {
+	return p.mem, nil
+}
+
 func (p *Memloop) Read(arr []byte) (n int, err error) {
+	if len(arr) < int(p.conf.RecordSize) { //Breaks read interface but it have to. Avoid io.ReadAll
+		//usually problem if non power of 2 record size and io.ReadAll kind of method
+		return 0, fmt.Errorf("Asked %v bytes, minimum record size is %v", len(arr), p.conf.RecordSize)
+	}
+
 	if p.readIndex < 0 {
 		p.readIndex = 0
 	}

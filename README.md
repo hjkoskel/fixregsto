@@ -25,7 +25,7 @@ Typical use case for fixed size record is for storing vital information like eve
 
 ## How to use
 
-There is interface *FixRegSto* for accessing stored data. FixRegSto implements ReadWriteSeeker interface. (exception is that it access complete records so N*recordSize quantities). So it is possible to read latest data with ioutil.ReadAll
+There is interface *FixRegSto* for accessing stored data. FixRegSto implements ReadWriteSeeker interface. (exception is that it access complete records so N*recordSize quantities). It is possible to read latest data with ioutil.ReadAll IF recordSize is power of two. (ReadAll queries with power of two size chunks)
 
 There are now two implementations
 - FileStorage for for file based persistent disk storage. 
@@ -35,4 +35,3 @@ There are now two implementations
 - MemLoop for memory based volatile storage
 
 Check ./example on this repository
-

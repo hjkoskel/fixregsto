@@ -21,7 +21,7 @@ import (
 //Path, path to directory where data is stored
 type FileStorageConf struct {
 	Name         string //Numbering _0, _1,_2 etc..
-	RecordSize   int64  //One entry is this long
+	RecordSize   int64  //One entry is this long, prefer power of two
 	MaxFileCount int64  //TODO if 0? no at least 1
 
 	FileMaxSize int64 //How many bytes. Prefer multiple of 512 (erase blocks size optimal)
@@ -290,8 +290,39 @@ func (p *FileStorage) GetFirst(nRecords int64) ([]byte, error) {
 	return result[0:targetSize], nil
 }
 
+//ReadAll gets all content. Use with caution, small storages
+func (p *FileStorage) ReadAll() ([]byte, error) {
+	result := []byte{}
+	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	if errRange != nil {
+		return result, errRange
+	}
+
+	if filecount == 0 {
+		return p.workBuffer, nil
+	}
+
+	for fileNumber := minFileNumber; fileNumber <= maxFileNumber; fileNumber++ {
+		fname := p.filename(fileNumber)
+		if fileExists(fname) {
+			byt, errRead := ioutil.ReadFile(fname)
+			if errRead != nil {
+				return result, errRead
+			}
+			result = append(result, byt...)
+		}
+	}
+	result = append(result, p.workBuffer...)
+	return result, nil
+}
+
 //Read implements Reader interface.  Except only array length must be multiple of recordsize for normal operation
 func (p *FileStorage) Read(arr []byte) (n int, err error) {
+	if len(arr) < int(p.conf.RecordSize) { //Breaks read interface but it have to. Avoid io.ReadAll
+		//usually problem if non power of 2 record size and io.ReadAll kind of method
+		return 0, fmt.Errorf("Asked %v bytes, minimum record size is %v", len(arr), p.conf.RecordSize)
+	}
+
 	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
 	if errRange != nil {
 		return 0, errRange

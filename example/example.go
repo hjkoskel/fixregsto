@@ -5,9 +5,10 @@ Simple example just how to use FixRegSto interface
 package main
 
 import (
-	"fixregsto"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/hjkoskel/fixregsto"
 )
 
 func testWith8byteRecords(sto fixregsto.FixRegSto) error {

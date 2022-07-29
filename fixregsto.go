@@ -12,4 +12,5 @@ type FixRegSto interface {
 	GetFirst(nRecords int64) ([]byte, error)  //Without chancing read pointer
 	Seek(offset int64, whence int) (int64, error)
 	Read(arr []byte) (n int, err error)
+	ReadAll() ([]byte, error)
 }

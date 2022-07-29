@@ -1,4 +1,4 @@
-module fixregsto
+module github.com/hjkoskel/fixregsto
 
 go 1.18
 
