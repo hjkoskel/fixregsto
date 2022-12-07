@@ -6,7 +6,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 
 	"github.com/hjkoskel/fixregsto"
 )
@@ -20,8 +20,6 @@ func testWith8byteRecords(sto fixregsto.FixRegSto) error {
 
 	for i := 0; i < 255; i++ {
 		_, errWrite := sto.Write([]byte{1, 1, 1, 1, 1, 1, 1, 1})
-		//_, errWrite := sto.Write([]byte{2, 2, 2, 2, 2, 2, 2, 2})
-		//_, errWrite := sto.Write([]byte{10, 10, 10, 10, 10, 10, 10, 10})
 		if errWrite != nil {
 			return errWrite
 		}
@@ -50,6 +48,8 @@ func main() {
 		MaxFileCount: 4,
 		FileMaxSize:  512 * 8, //So it is 512 records per file...
 		Path:         "./exampledata",
+		//CompressionMethod: fixregsto.COMPRESSIONMETHOD_GZ,  ACTIVATE if compression is required
+		BitSlices: []int{}, //Add struct bit sizes if it brings better compression
 	}
 	fmt.Printf("Conf is %#v\n", alphaConf)
 
@@ -65,7 +65,7 @@ func main() {
 		fmt.Printf("Test ok")
 	}
 
-	allbuf, errbuf := ioutil.ReadAll(&sto)
+	allbuf, errbuf := io.ReadAll(&sto)
 	if errbuf != nil {
 		fmt.Printf("errbuf=%v\n", errbuf.Error())
 		return
@@ -74,13 +74,12 @@ func main() {
 
 	sto.Write([]byte{0x69, 0x69, 0x69, 0x69, 0x69, 0x69, 0x69, 0x69})
 
-	nextbuf, errnextbuf := ioutil.ReadAll(&sto)
+	nextbuf, errnextbuf := io.ReadAll(&sto)
 	if errnextbuf != nil {
 		fmt.Printf("errnextbuf=%v\n", errnextbuf.Error())
 		return
 	}
 	fmt.Printf("nextbuf %#v \nsize=%v\n", nextbuf, len(nextbuf))
-
 	//use io.copy and make databackup
 
 }

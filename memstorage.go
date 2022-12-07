@@ -135,10 +135,3 @@ func (p *Memloop) Seek(offset int64, whence int) (int64, error) {
 	}
 	return p.readIndex, nil
 }
-
-/*
-func (p *Memloop) ResetRead() error {
-	p.readIndex = 0
-	return nil
-}
-*/

@@ -20,6 +20,9 @@ Allowing only fixed size records to rotating log might sound restrictive but it 
 - Predictability
 - Efficient storage usage
 
+Compression and coding features
+- gz compression support for history data
+- possible to arrange bits for better compression
 
 Typical use case for fixed size record is for storing vital information like events, counters etc.. Datapoints that are critical for operation but very old entries are not anymore relevant.
 
@@ -35,3 +38,25 @@ There are now two implementations
 - MemLoop for memory based volatile storage
 
 Check ./example on this repository
+
+## FileStorage
+
+File storage is now only permanent storage option.
+
+```go
+type FileStorageConf struct {
+	Name         string //Numbering _0, _1,_2 etc..
+	RecordSize   int64  //One entry is this long, prefer power of two
+	MaxFileCount int64  //TODO if 0? no at least 1
+
+	FileMaxSize int64 //How many bytes. Prefer multiple of 512 (erase blocks size optimal)
+	Path        string
+
+	//Compression settings
+	CompressionMethod string //Empty or "gz"
+	BitSlices         []int  //Empty array no slicing. Else give bitlengths (usually bit size of each variable in record)
+}
+```
+
+If CompressionMethod is set to "gz", files are compressed. Bit slices describes how file is splitted and arranged.
+Typical use would be in case of struct, set bitslices as array of variable sizes. In case of array of structs, variables are places to next to each other than concatting struct after struct. This conding might improve compression ratio at some cases

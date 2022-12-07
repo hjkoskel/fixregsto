@@ -26,15 +26,23 @@ type FileStorageConf struct {
 
 	FileMaxSize int64 //How many bytes. Prefer multiple of 512 (erase blocks size optimal)
 	Path        string
+
+	//Compression settings
+	CompressionMethod string //Empty or "gz"
+	BitSlices         []int  //Empty array no slicing.Else give bitlengths (usually bit size of each variable in record)
 }
 
 //FileStorage, includes conf and cached data
 type FileStorage struct {
 	conf FileStorageConf
 
-	workBuffer     []byte //Latest
-	readPosition   int64  //record counter
-	recordsPerFile int64  //pre calculated values
+	workBuffer   []byte //Latest
+	readPosition int64  //record counter
+}
+
+func (p *FileStorageConf) recordsPerFile() int64 {
+	return p.FileMaxSize / p.RecordSize
+
 }
 
 //CheckErrors tell is there problems with configuration
@@ -71,7 +79,7 @@ func (p *FileStorageConf) InitFileStorage() (FileStorage, error) {
 	workfile := p.BaseFileName()
 	if fileExists(workfile) {
 		var errRead error
-		result.workBuffer, errRead = ioutil.ReadFile(workfile)
+		result.workBuffer, errRead = os.ReadFile(workfile)
 		if errRead != nil {
 			return result, fmt.Errorf("Error reading %v err=%v", workfile, errRead.Error())
 		}
@@ -81,22 +89,20 @@ func (p *FileStorageConf) InitFileStorage() (FileStorage, error) {
 		return result, fmt.Errorf("Reset read failed in init err=%v", fixPointerErr.Error())
 	}
 
-	result.recordsPerFile = p.FileMaxSize / p.RecordSize
-
 	return result, nil
 }
 
-//getNumberRangeOnDisk, private function gets minimum and maximum number in storage files and count of files  (count is important if missing files in between? Also decides is delete needed)
-func (p *FileStorage) getNumberRangeOnDisk() (int64, int64, int64, error) {
+//getNumberRangeOnDisk, function gets minimum and maximum number in storage files and count of files  (count is important if missing files in between? Also decides is delete needed)
+func (p *FileStorageConf) GetNumberRangeOnDisk() (int64, int64, int64, error) {
 	count := int64(0)
-	fileinfos, errDir := ioutil.ReadDir(filepath.Dir(p.conf.BaseFileName()))
+	fileinfos, errDir := ioutil.ReadDir(filepath.Dir(p.BaseFileName()))
 	if errDir != nil {
 		return 0, 0, 0, errDir
 	}
 	minresult := int64(math.MaxInt64)
 	maxresult := int64(-1)
 	//-1 not found
-	prefix := p.conf.Name + "_"
+	prefix := p.Name + "_"
 	for _, finfo := range fileinfos {
 		name := finfo.Name()
 		if !strings.HasPrefix(name, prefix) || finfo.IsDir() {
@@ -122,8 +128,8 @@ func (p *FileStorage) getNumberRangeOnDisk() (int64, int64, int64, error) {
 }
 
 //gets filename for filestorage
-func (p *FileStorage) filename(n int64) string {
-	return fmt.Sprintf("%s_%v", p.conf.BaseFileName(), n)
+func (p *FileStorageConf) filename(n int64) string {
+	return fmt.Sprintf("%s_%v", p.BaseFileName(), n)
 }
 
 //Write implements writer interface. Only complete records are accepted
@@ -134,7 +140,7 @@ func (p *FileStorage) Write(raw []byte) (n int, err error) { //size must be reco
 
 	newRecordCount := int64(len(raw)) / p.conf.RecordSize
 	recordsInWork := int64(len(p.workBuffer)) / p.conf.RecordSize
-	recordsFreeInWork := p.recordsPerFile - recordsInWork
+	recordsFreeInWork := p.conf.recordsPerFile() - recordsInWork
 
 	//Easy case, just update work buffer and sync that to disk
 	if newRecordCount < recordsFreeInWork { //Not need yet to rename work
@@ -153,18 +159,18 @@ func (p *FileStorage) Write(raw []byte) (n int, err error) { //size must be reco
 	p.workBuffer = append(p.workBuffer, newPiece...)
 	raw = raw[recordsFreeInWork*p.conf.RecordSize:]
 
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return 0, fmt.Errorf("FileStorage Write erro gettin number range err=%w", errRange)
 	}
 
-	_, wErr := writeWithFsyncCow(p.filename(maxFileNumber+1), p.workBuffer)
+	_, wErr := writeWithFsyncCowCompressed(p.conf.filename(maxFileNumber+1), p.workBuffer, p.conf.CompressionMethod, p.conf.BitSlices)
 	if wErr != nil {
 		return 0, wErr
 	}
 
 	if p.conf.MaxFileCount <= filecount {
-		oldFileName := p.filename(minFileNumber)
+		oldFileName := p.conf.filename(minFileNumber)
 		removeErr := os.Remove(oldFileName)
 		if removeErr != nil {
 			return 0, fmt.Errorf("Error removing file on FileStorage Write err=%v  conf.maxFileCount=%v, maxFileNumber=%v minFileNumber=%v", removeErr.Error(), p.conf.MaxFileCount, minFileNumber, maxFileNumber)
@@ -176,20 +182,20 @@ func (p *FileStorage) Write(raw []byte) (n int, err error) { //size must be reco
 	os.Remove(p.conf.BaseFileName()) //Remove that there would not be wrong material if fail
 
 	//Check is there need to write multiple files completely
-	bytesPerFile := p.recordsPerFile * p.conf.RecordSize
+	bytesPerFile := p.conf.recordsPerFile() * p.conf.RecordSize
 	for int(bytesPerFile) <= len(raw) { //While there is data for enough for complete files
-		minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+		minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 		if errRange != nil {
 			return 0, fmt.Errorf("FileStorage Write erro gettin number range err=%w", errRange)
 		}
 
-		_, wErr := writeWithFsyncCow(p.filename(maxFileNumber+1), raw[0:bytesPerFile])
+		_, wErr := writeWithFsyncCowCompressed(p.conf.filename(maxFileNumber+1), raw[0:bytesPerFile], p.conf.CompressionMethod, p.conf.BitSlices)
 		if wErr != nil {
 			return 0, wErr
 		}
 		raw = raw[bytesPerFile:]
 		if p.conf.MaxFileCount <= filecount {
-			oldFileName := p.filename(minFileNumber)
+			oldFileName := p.conf.filename(minFileNumber)
 			removeErr := os.Remove(oldFileName)
 			if removeErr != nil {
 				return 0, fmt.Errorf("Error removing file on FileStorage Write err=%v  conf.maxFileCount=%v, maxFileNumber=%v minFileNumber=%v", removeErr.Error(), p.conf.MaxFileCount, minFileNumber, maxFileNumber)
@@ -198,7 +204,6 @@ func (p *FileStorage) Write(raw []byte) (n int, err error) { //size must be reco
 	}
 
 	p.workBuffer = raw //let this be work buffer
-
 	//Write work file
 	basefilename := p.conf.BaseFileName() //Known as work file
 	_, wErr = writeWithFsyncCow(basefilename, p.workBuffer)
@@ -211,7 +216,7 @@ func (p *FileStorage) Write(raw []byte) (n int, err error) { //size must be reco
 //Len returns how many records are stored
 func (p *FileStorage) Len() (int64, error) {
 	bytecount := int64(len(p.workBuffer))
-	minFileNumber, maxFileNumber, _, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, _, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return 0, errRange
 	}
@@ -230,11 +235,16 @@ func (p *FileStorage) Len() (int64, error) {
 	return bytecount / p.conf.RecordSize, nil
 }
 
+//Uses conf. Does not include state like FileStorage
+func (p *FileStorageConf) ReadFileWithNumber(fileNumber int64) ([]byte, error) {
+	return readCompressedFile(p.filename(fileNumber), p.CompressionMethod, p.BitSlices)
+}
+
 func (p *FileStorage) GetLatest(nRecords int64) ([]byte, error) {
 	if nRecords < 1 {
 		return nil, fmt.Errorf("wrong parameter nRecords=%v", nRecords)
 	}
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return nil, errRange
 	}
@@ -242,7 +252,7 @@ func (p *FileStorage) GetLatest(nRecords int64) ([]byte, error) {
 	result := append([]byte{}, p.workBuffer...)
 	if 0 < filecount {
 		for fileNumber := maxFileNumber; minFileNumber <= fileNumber; fileNumber-- {
-			byt, errRead := ioutil.ReadFile(p.filename(fileNumber))
+			byt, errRead := p.conf.ReadFileWithNumber(fileNumber)
 			if errRead != nil {
 				return result, errRead
 			}
@@ -264,7 +274,7 @@ func (p *FileStorage) GetFirst(nRecords int64) ([]byte, error) {
 	if nRecords < 1 {
 		return nil, fmt.Errorf("wrong parameter nRecords=%v", nRecords)
 	}
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return nil, errRange
 	}
@@ -272,7 +282,7 @@ func (p *FileStorage) GetFirst(nRecords int64) ([]byte, error) {
 	result := []byte{}
 	if 0 < filecount {
 		for fileNumber := minFileNumber; fileNumber <= maxFileNumber; fileNumber++ {
-			byt, errRead := ioutil.ReadFile(p.filename(fileNumber))
+			byt, errRead := p.conf.ReadFileWithNumber(fileNumber)
 			if errRead != nil {
 				return result, errRead
 			}
@@ -293,7 +303,7 @@ func (p *FileStorage) GetFirst(nRecords int64) ([]byte, error) {
 //ReadAll gets all content. Use with caution, small storages
 func (p *FileStorage) ReadAll() ([]byte, error) {
 	result := []byte{}
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return result, errRange
 	}
@@ -303,9 +313,9 @@ func (p *FileStorage) ReadAll() ([]byte, error) {
 	}
 
 	for fileNumber := minFileNumber; fileNumber <= maxFileNumber; fileNumber++ {
-		fname := p.filename(fileNumber)
+		fname := p.conf.filename(fileNumber)
 		if fileExists(fname) {
-			byt, errRead := ioutil.ReadFile(fname)
+			byt, errRead := p.conf.ReadFileWithNumber(fileNumber)
 			if errRead != nil {
 				return result, errRead
 			}
@@ -323,14 +333,14 @@ func (p *FileStorage) Read(arr []byte) (n int, err error) {
 		return 0, fmt.Errorf("Asked %v bytes, minimum record size is %v", len(arr), p.conf.RecordSize)
 	}
 
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return 0, errRange
 	}
-	fileNumber := p.readPosition / p.recordsPerFile
+	fileNumber := p.readPosition / p.conf.recordsPerFile()
 
 	if fileNumber < int64(minFileNumber) { //If already dropped
-		p.readPosition = int64(minFileNumber) * int64(p.recordsPerFile)
+		p.readPosition = int64(minFileNumber) * p.conf.recordsPerFile()
 		fileNumber = minFileNumber
 	}
 
@@ -338,13 +348,13 @@ func (p *FileStorage) Read(arr []byte) (n int, err error) {
 	bytesNeeded := int64(p.conf.RecordSize) * int64(recordsNeeded) // return n is this or lower
 
 	crudeBuf := []byte{}                                                                //Crude way but minimize bugs first, then make unit tests and then optimize memory usage and speed
-	startIndex := (p.readPosition % int64(p.recordsPerFile)) * int64(p.conf.RecordSize) //Inside file or this crude buf
+	startIndex := (p.readPosition % p.conf.recordsPerFile()) * int64(p.conf.RecordSize) //Inside file or this crude buf
 	//Pick file numbers that are available, skip others. Break when enough
 	if 0 < filecount {
 		for ; fileNumber <= maxFileNumber; fileNumber++ {
-			fname := p.filename(fileNumber)
+			fname := p.conf.filename(fileNumber)
 			if fileExists(fname) {
-				byt, errRead := ioutil.ReadFile(fname)
+				byt, errRead := p.conf.ReadFileWithNumber(fileNumber)
 				if errRead != nil {
 					return 0, errRead
 				}
@@ -390,13 +400,13 @@ func (p *FileStorage) Read(arr []byte) (n int, err error) {
 //Seeks, For implementing seeker interface
 //Seeks file with byte by byte but rounds up new position where record starts (or ends)
 func (p *FileStorage) Seek(offset int64, whence int) (int64, error) {
-	minFileNumber, maxFileNumber, filecount, errRange := p.getNumberRangeOnDisk()
+	minFileNumber, maxFileNumber, filecount, errRange := p.conf.GetNumberRangeOnDisk()
 	if errRange != nil {
 		return 0, errRange
 	}
 
-	maxPosition := int64(len(p.workBuffer))/p.conf.RecordSize + int64(maxFileNumber+1)*p.recordsPerFile
-	minPosition := int64(minFileNumber) * p.recordsPerFile
+	maxPosition := int64(len(p.workBuffer))/p.conf.RecordSize + int64(maxFileNumber+1)*p.conf.recordsPerFile()
+	minPosition := int64(minFileNumber) * p.conf.recordsPerFile()
 
 	if filecount == 0 {
 		minPosition = 0

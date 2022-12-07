@@ -2,7 +2,6 @@ package fixregsto
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -27,7 +26,7 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, nil, errResetReadZero)
 	assert.Equal(t, int64(0), emptystart)
 
-	readEmptyBytes, errReadEmptyBytes := ioutil.ReadAll(dut)
+	readEmptyBytes, errReadEmptyBytes := io.ReadAll(dut)
 	assert.Equal(t, []byte{}, readEmptyBytes)
 	assert.Equal(t, nil, errReadEmptyBytes)
 
@@ -39,10 +38,6 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, 0, wrote0)
 	assert.NotEqual(t, nil, errWriteWrong)
 
-	/*wrote0, errWriteWrong = dut.Write(make([]byte, 8*1024))
-	assert.Equal(t, 0, wrote0)
-	assert.NotEqual(t, nil, errWriteWrong)*/
-
 	/*
 		Write something
 	*/
@@ -50,11 +45,11 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, 8, wrote1)
 	assert.Equal(t, nil, errWrite1)
 
-	read1Entry, err1Entry := ioutil.ReadAll(dut)
+	read1Entry, err1Entry := io.ReadAll(dut)
 	assert.Equal(t, []byte{69, 42, 69, 42, 69, 42, 69, 42}, read1Entry)
 	assert.Equal(t, nil, err1Entry)
 
-	readEmptyBytes, errReadEmptyBytes = ioutil.ReadAll(dut) //Yes it is empty
+	readEmptyBytes, errReadEmptyBytes = io.ReadAll(dut) //Yes it is empty
 	assert.Equal(t, []byte{}, readEmptyBytes)
 	assert.Equal(t, nil, errReadEmptyBytes)
 
@@ -79,7 +74,7 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, 16, wroteDouble)
 	assert.Equal(t, nil, errWriteDouble)
 
-	readAllEntry, errAllEntry := ioutil.ReadAll(dut)
+	readAllEntry, errAllEntry := io.ReadAll(dut)
 	assert.Equal(t, []byte{
 		1, 1, 1, 1, 1, 1, 1, 1,
 		2, 2, 2, 2, 2, 2, 2, 2,
@@ -140,7 +135,7 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, nil, errseeklatest3)
 	assert.Equal(t, int64(1424), seeklatest3)
 
-	seek3data, errseek3data := ioutil.ReadAll(dut) //Must read same as get latest
+	seek3data, errseek3data := io.ReadAll(dut) //Must read same as get latest
 	assert.Equal(t, nil, errseek3data)
 	assert.Equal(t, []byte{
 		0x9, 0x9, 0x9, 0x9, 0x9, 0x9, 0x9, 0x9,
@@ -165,7 +160,7 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, nil, errSeekEndPos)
 	assert.Equal(t, int64(1448), seekEndPos)
 
-	nodata, errNodata := ioutil.ReadAll(dut)
+	nodata, errNodata := io.ReadAll(dut)
 	assert.Equal(t, nil, errNodata)
 	assert.Equal(t, []byte{}, nodata)
 
@@ -174,7 +169,7 @@ func emptytest(t *testing.T, dut FixRegSto) {
 	assert.Equal(t, nil, errSeekEndPosm1)
 	assert.Equal(t, int64(1440), seekEndPosm1)
 
-	m1data, errm1data := ioutil.ReadAll(dut)
+	m1data, errm1data := io.ReadAll(dut)
 	assert.Equal(t, nil, errm1data)
 	assert.Equal(t, []byte{0x2, 0x2, 0x2, 0x2, 0x2, 0x2, 0x2, 0x2}, m1data) //TODO HUOMENNA. Seek loppuun niin ei pitäisi tulla tavuja
 
@@ -248,4 +243,21 @@ func TestFileOnTMP(t *testing.T) {
 	nreadmucho, nreadmucherr := fl.Read(testReadMuchoArr)
 	assert.Equal(t, 497, nreadmucho)
 	assert.Equal(t, nil, nreadmucherr)
+}
+
+func TestGz(t *testing.T) {
+	//Just test gzip compression no slicing...with slicing
+
+	//testcontent := []byte{1, 2, 3, 4, 5, 2, 2, 3, 4, 5, 3, 2, 3, 4, 5, 4, 2, 3, 4, 5, 5, 2, 3, 4, 5, 6, 2, 3, 4, 5, 7, 2, 3, 4, 5, 8, 2, 3, 4, 5}
+	testcontent := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	pattern := []int{8, 8}
+
+	n, errWrite := writeWithFsyncCowCompressed("/tmp/compressTest", testcontent, COMPRESSIONMETHOD_GZ, pattern)
+	assert.Equal(t, nil, errWrite)
+	assert.Equal(t, n, len(testcontent))
+
+	contentBack, errContent := readCompressedFile("/tmp/compressTest", COMPRESSIONMETHOD_GZ, pattern)
+	assert.Equal(t, nil, errContent)
+	assert.EqualValues(t, testcontent, contentBack)
+
 }
